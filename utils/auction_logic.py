@@ -10,7 +10,7 @@ def get_gsheet():
         st.secrets["google_service_account"], scopes=scope
     )
     client = gspread.authorize(creds)
-    sheet = client.open("IIFT Auction DB")  # Your actual Google Sheet name
+    sheet = client.open("IIFT Auction Sheet")  # Your actual Google Sheet name
     return sheet
 
 def load_players():
