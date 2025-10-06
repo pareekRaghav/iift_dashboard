@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 
 # === Google Sheets Setup ===
 def get_gsheet():
-    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(
         st.secrets["google_service_account"], scopes=scope
     )
