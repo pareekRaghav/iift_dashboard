@@ -1,64 +1,69 @@
 import pandas as pd
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 
-# File paths
-PLAYER_FILE = "data/players.csv"
-TEAM_FILE = "data/teams.csv"
+# === Google Sheets Setup ===
+def get_gsheet():
+    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(
+        st.secrets["google_service_account"], scopes=scope
+    )
+    client = gspread.authorize(creds)
+    sheet = client.open("IIFT Auction DB")  # Your actual Google Sheet name
+    return sheet
 
-# Load CSVs
 def load_players():
-    return pd.read_csv(PLAYER_FILE)
+    ws = get_gsheet().worksheet("Players")
+    df = pd.DataFrame(ws.get_all_records())
+    return df
 
 def load_teams():
-    return pd.read_csv(TEAM_FILE)
+    ws = get_gsheet().worksheet("Teams")
+    df = pd.DataFrame(ws.get_all_records())
+    return df
 
-def save_players(df):
-    df.to_csv(PLAYER_FILE, index=False)
+def get_live_player(players_df):
+    live = players_df[players_df["Status"] == "Live"]
+    if not live.empty:
+        return live.iloc[0]
+    return None
 
-def save_teams(df):
-    df.to_csv(TEAM_FILE, index=False)
+def sell_player_manual(players_df, teams_df, winner_team, final_bid):
+    sheet = get_gsheet()
+    ws_players = sheet.worksheet("Players")
+    ws_teams = sheet.worksheet("Teams")
 
-# Get current player
-def get_live_player(df):
-    live = df[df['Status'] == 'Live']
-    return live.iloc[0] if not live.empty else None
+    # Update player status
+    live_player = get_live_player(players_df)
+    if live_player is not None:
+        row_idx = players_df.index[players_df["Player Name"] == live_player["Player Name"]][0] + 2
+        ws_players.update(f"C{row_idx}", "Sold")
+        ws_players.update(f"E{row_idx}", winner_team)
+        ws_players.update(f"F{row_idx}", final_bid)
 
-# Move to next player
-def start_next_player(df):
-    upcoming = df[df['Status'] == 'Upcoming']
+    # Update team info
+    team_row = teams_df.index[teams_df["Team Name"] == winner_team][0] + 2
+    new_spent = int(teams_df.loc[team_row - 2, "Spent"]) + int(final_bid)
+    new_remaining = int(teams_df.loc[team_row - 2, "Remaining Budget"]) - int(final_bid)
+    new_players_bought = int(teams_df.loc[team_row - 2, "Players Bought"]) + 1
+
+    ws_teams.update(f"B{team_row}", new_remaining)
+    ws_teams.update(f"C{team_row}", new_players_bought)
+    ws_teams.update(f"D{team_row}", new_spent)
+
+def start_next_player(players_df):
+    sheet = get_gsheet()
+    ws = sheet.worksheet("Players")
+
+    # Mark current Live player as Sold if not already
+    current_live = players_df[players_df["Status"] == "Live"]
+    if not current_live.empty:
+        idx = players_df.index[players_df["Status"] == "Live"][0] + 2
+        ws.update(f"C{idx}", "Sold")
+
+    # Start next "Upcoming" player
+    upcoming = players_df[players_df["Status"] == "Upcoming"]
     if not upcoming.empty:
-        idx = upcoming.index[0]
-        df.at[idx, 'Status'] = 'Live'
-        save_players(df)
-
-# Place a bid
-def place_bid(player_df, team_name, bid_increment):
-    idx = player_df[player_df['Status'] == 'Live'].index[0]
-    current_bid = player_df.at[idx, 'Current Bid']
-    base_price = player_df.at[idx, 'Base Price']
-    current_bid = base_price if pd.isna(current_bid) else current_bid
-    new_bid = current_bid + bid_increment
-    player_df.at[idx, 'Current Bid'] = new_bid
-    player_df.at[idx, 'Highest Bidder'] = team_name
-    save_players(player_df)
-
-# Sell player
-def sell_player(player_df, team_df):
-    idx = player_df[player_df['Status'] == 'Live'].index[0]
-    team_name = player_df.at[idx, 'Highest Bidder']
-    final_price = player_df.at[idx, 'Current Bid']
-
-    if pd.isna(team_name) or pd.isna(final_price):
-        return  # No valid bid placed
-
-    # Update player
-    player_df.at[idx, 'Sold To'] = team_name
-    player_df.at[idx, 'Final Price'] = final_price
-    player_df.at[idx, 'Status'] = 'Sold'
-    save_players(player_df)
-
-    # Update team
-    t_idx = team_df[team_df['Team Name'] == team_name].index[0]
-    team_df.at[t_idx, 'Spent'] += final_price
-    team_df.at[t_idx, 'Remaining Budget'] -= final_price
-    team_df.at[t_idx, 'Players Bought'] += 1
-    save_teams(team_df)
+        next_idx = players_df.index[players_df["Status"] == "Upcoming"][0] + 2
+        ws.update(f"C{next_idx}", "Live")
